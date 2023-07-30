@@ -1,78 +1,112 @@
+#####################################################################
+# 1- Create a PySpark DataFrame which includes: 
+# 'customer_id','age','ads_click_count','ads_price','country' and 'gender' features.
+#####################################################################
 from pyspark.sql import SparkSession
 
-######################################################################################
-######################################## EDA ######################################### 
-######################################################################################
+def read_data(path):
+    spark = SparkSession.builder.master("local").appName("DataAnalysis").getOrCreate()
+
+    # Load the CSV data into a DataFrame
+    df = spark.read.option("header", "true").csv(path)
+
+    # Select only the specified columns
+    selected_columns = ['customer_id', 'age', 'ads_click_count', 'ads_price', 'country', 'gender']
+    df = df.select(*selected_columns)
+    return df
 
 #####################################################################
-# 1- Create a DataFrame using the provided dataset:
+# 2- Apply suitable missing value imputation techniques on the features 
+# which have missing samples using with PySpark API.
 #####################################################################
-
-# Initialize SparkSession
-spark = SparkSession.builder.appName("DataAnalysis").getOrCreate()
-#spark = SparkSession.builder.master("local").appName("DataAnalysis").getOrCreate()
-
-# Load the CSV data into a DataFrame
-df = spark.read.option("header", "true").csv("dataset/eda.csv")
-
-# Stop the SparkSession and close any associated resources
-spark.stop()
-
-#####################################################################
-# 2- Create a DataFrame using the provided dataset:
-#####################################################################
-
-# Register DataFrame as a temporary view to use SQL queries
-df.createOrReplaceTempView("customers")
-
-# SQL query to find unique Customer IP count who lives in France
-result_ip_count_france = spark.sql("""
-    SELECT COUNT(DISTINCT customer_ip) AS UniqueIPCount
-    FROM customers
-    WHERE Country = 'France'
-""")
-
-# Collect the result and print it
-unique_ip_count_france = result_ip_count_france.collect()[0]['UniqueIPCount']
-print("Unique Customer IP count in France:", unique_ip_count_france)
-
-#####################################################################
-# 3- Average “ads_price” value between 1st of January 2023 and 3rd of March 2023 date interval
-#####################################################################
-
+from pyspark.ml.feature import Imputer
 from pyspark.sql.functions import col
-from pyspark.sql.types import DateType
+from pyspark.sql.types import IntegerType
 
-# Convert the 'date' column to DateType
-df = df.withColumn("date", col("date").cast(DateType()))
+def df_imputer(df,numeric_columns,categorical_columns):
+    for column in numeric_columns:
+        df = df.withColumn(column, col(column).cast(IntegerType()))
 
-# Filter the DataFrame to get data within the specified date interval
-start_date = "2023-01-01"
-end_date = "2023-03-03"
-filtered_df = df.filter((col("date") >= start_date) & (col("date") <= end_date))
+    # Impute missing values in numeric columns with mean
+    imputer = Imputer(strategy='mean', inputCols=numeric_columns, outputCols=[col + '_imputed' for col in numeric_columns])
+    df_imputed = imputer.fit(df).transform(df)
 
-print(filtered_df.show(5))
-
-# Calculate the average ads_price within the date interval
-result_avg_ads_price = filtered_df.agg({"ads_price": "avg"}).collect()[0][0]
-print("Average ads_price between 1st January 2023 and 3rd March 2023:", result_avg_ads_price)
+    # Iterate through the columns with missing values
+    for column in categorical_columns:
+        # Find the most frequent value for the current column
+        most_frequent_value = df_imputed.groupBy(column).count().orderBy(col("count").desc()).first()[column]
+        
+        # Fill missing values in the current column with the most frequent value
+        df_imputed = df_imputed.fillna(most_frequent_value, subset=[column])
+    return df_imputed
 
 #####################################################################
-# 4- Find the country that has the maximum number of customers in 2022:
+# 3- Apply a suitable scaling or standardization method for 
+# numerical features which are 'ads_click_count' and 'ads_price' using with PySpark API.
 #####################################################################
-"""
-from pyspark.sql.functions import year
+from pyspark.ml.feature import StandardScaler
+from pyspark.ml.feature import VectorAssembler
 
-# Filter the DataFrame to get data for the year 2022
-df_2022 = df.filter(year("date") == 2022)
+def df_scaler(df,columns):
+    # Initialize the StandardScaler
+    scaler = StandardScaler(inputCol="features", outputCol="scaled_features", withStd=True, withMean=True)
 
-# Group by 'country' and count the number of customers in each country
-country_customers_count = df_2022.groupBy("country").count()
+    # Assemble the features into a single vector
+    assembler = VectorAssembler(inputCols=columns, outputCol="features")
+    df = assembler.transform(df)
 
-print(country_customers_count)
+    # Scale the features
+    scaler_model = scaler.fit(df)
+    df_scaled = scaler_model.transform(df)
 
-# Find the country with the maximum number of customers
-#result_max_customers_country = country_customers_count.orderBy("count", ascending=False).first()['country']
-#print("Country with the maximum number of customers in 2022:", result_max_customers_country)
-"""
+    return df_scaled
 
+#####################################################################
+# 4- Apply a suitable encoding method for categorical features 
+# which are “gender” and “country” using with PySpark API.
+#####################################################################
+from pyspark.ml.feature import StringIndexer, OneHotEncoder, VectorAssembler
+from pyspark.ml import Pipeline
+from pyspark.sql.functions import explode
+
+def df_encoder(df,columns):
+    # Apply StringIndexer and OneHotEncoder on categorical columns using a pipeline
+    indexers = [StringIndexer(inputCol=column, outputCol=column + "_index") for column in columns]
+    encoder = [OneHotEncoder(inputCols=[column + "_index"], outputCols=[column + "_encoded"]) for column in columns]
+
+    # Create a pipeline to chain the stages together
+    pipeline_stages = indexers + encoder
+    pipeline = Pipeline(stages=pipeline_stages)
+
+    # Fit and transform the pipeline
+    pipeline_model = pipeline.fit(df)
+    df_encoded = pipeline_model.transform(df)
+    df_encoded = df_encoded.drop("features")
+
+    return df_encoded
+
+#####################################################################
+# TASK 3
+#####################################################################
+from pyspark.sql import SparkSession
+from pyspark.ml.feature import VectorAssembler
+from pyspark.ml.clustering import KMeans
+
+def cluester_generator(df, columns,k = 3):
+    # Select the necessary columns for clustering from the DataFrame
+    df_for_clustering = df.select(*columns)
+
+    # Create a vector column from the scaled_features column
+    vector_assembler = VectorAssembler(inputCols=['gender_encoded', 'country_encoded', 'scaled_features'], outputCol="features")
+    df_for_clustering = vector_assembler.transform(df_for_clustering)
+
+    # Initialize the K-Means model with the defined the number of clusters (k)
+    kmeans = KMeans().setK(k).setSeed(1)
+
+    # Fit the K-Means model to the data
+    kmeans_model = kmeans.fit(df_for_clustering)
+
+    # Make predictions using the K-Means model
+    clustered_data = kmeans_model.transform(df_for_clustering)
+
+    return clustered_data
