@@ -15,7 +15,7 @@ def main():
     categorical_columns = ['gender','country']
 
     df_imputed = df_imputer(df=df,numeric_columns=numeric_columns,categorical_columns=categorical_columns)
-    print(df_imputed.show(5))
+    df_imputed.show(5)
 
     print("######################################################################")
     print("2. Step is Done")
@@ -24,7 +24,7 @@ def main():
     # Columns to be scaled
     feature_cols = ['age_imputed', 'ads_click_count_imputed', 'ads_price_imputed']
     df_scaled = df_scaler(df_imputed,feature_cols)
-    print(df_scaled.show(5))
+    df_scaled.show(5)
 
     print("######################################################################")
     print("3. Step is Done")

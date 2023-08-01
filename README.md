@@ -43,7 +43,7 @@ This repository contains a data processing pipeline implemented in PySpark for h
 
 1. Install the required dependencies by running:
 
-pip install -r requirements
+pip install -r requirements.txt
 
 
 2. Run the main script:

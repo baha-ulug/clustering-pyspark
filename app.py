@@ -28,7 +28,7 @@ def df_imputer(df,numeric_columns,categorical_columns):
         df = df.withColumn(column, col(column).cast(IntegerType()))
 
     # Impute missing values in numeric columns with mean
-    imputer = Imputer(strategy='mean', inputCols=numeric_columns, outputCols=[col + '_imputed' for col in numeric_columns])
+    imputer = Imputer(strategy='median', inputCols=numeric_columns, outputCols=[col + '_imputed' for col in numeric_columns])
     df_imputed = imputer.fit(df).transform(df)
 
     # Iterate through the columns with missing values
@@ -48,14 +48,14 @@ from pyspark.ml.feature import StandardScaler
 from pyspark.ml.feature import VectorAssembler
 
 def df_scaler(df,columns):
-    # Initialize the StandardScaler
-    scaler = StandardScaler(inputCol="features", outputCol="scaled_features", withStd=True, withMean=True)
-
-    # Assemble the features into a single vector
+    # Assemble the features into a single vector, because StandartScaler expects input and output columns as a vector
     assembler = VectorAssembler(inputCols=columns, outputCol="features")
     df = assembler.transform(df)
 
-    # Scale the features
+    # Initialize the StandardScaler
+    scaler = StandardScaler(inputCol="features", outputCol="scaled_features", withStd=True, withMean=True)
+
+    # Features are scaled
     scaler_model = scaler.fit(df)
     df_scaled = scaler_model.transform(df)
 
@@ -70,11 +70,11 @@ from pyspark.ml import Pipeline
 from pyspark.sql.functions import explode
 
 def df_encoder(df,columns):
-    # Apply StringIndexer and OneHotEncoder on categorical columns using a pipeline
+    # StringIndexer and OneHotEncoder on categorical columns using a pipeline
     indexers = [StringIndexer(inputCol=column, outputCol=column + "_index") for column in columns]
     encoder = [OneHotEncoder(inputCols=[column + "_index"], outputCols=[column + "_encoded"]) for column in columns]
 
-    # Create a pipeline to chain the stages together
+    # Create a pipeline stage to chain the steps
     pipeline_stages = indexers + encoder
     pipeline = Pipeline(stages=pipeline_stages)
 
@@ -103,10 +103,10 @@ def cluester_generator(df, columns,k = 3):
     # Initialize the K-Means model with the defined the number of clusters (k)
     kmeans = KMeans().setK(k).setSeed(1)
 
-    # Fit the K-Means model to the data
+    # Fit the K-Means model
     kmeans_model = kmeans.fit(df_for_clustering)
 
-    # Make predictions using the K-Means model
+    # Make predictions
     clustered_data = kmeans_model.transform(df_for_clustering)
 
     return clustered_data
